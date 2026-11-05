@@ -18,13 +18,7 @@ import math
 @dataclass(frozen=True)
 class Tube:
     length: float
-    od: float
-    id: float
     weight: float = 0.0
-
-    @property
-    def area(self):
-        return math.pi * (self.od - self.id) * (self.od + self.id) / 4.0
 
 
 @dataclass(frozen=True)
@@ -78,16 +72,12 @@ class Solution:
 
 
 def validate(tube: Tube, weights: list[Weight] | tuple[Weight, ...]):
-    if not all(math.isfinite(v) for v in (tube.length, tube.od, tube.id, tube.weight)):
+    if not all(math.isfinite(v) for v in (tube.length, tube.weight)):
         raise ValueError("All tube inputs must be finite numbers.")
     if tube.length <= 0:
         raise ValueError("Tube length must be greater than zero.")
-    if not 0 <= tube.id < tube.od:
-        raise ValueError("Diameters must satisfy 0 ≤ ID < OD.")
     if tube.weight < 0:
         raise ValueError("Tube weight must be zero or positive.")
-    if not math.isfinite(tube.area) or tube.area <= 0:
-        raise ValueError("The section dimensions exceed the numerical range.")
     for w in weights:
         if w.kind not in ("point", "uniform"):
             raise ValueError(f"{w.name}: choose a point or uniform weight.")
@@ -112,8 +102,8 @@ def solve_cg(tube: Tube, weights: list[Weight] | tuple[Weight, ...] = ()) -> Sol
     """Exact first-moment calculation; no support conditions or sampling.
 
     Uniform weights act at their interval midpoints. A zero total weight has
-    no defined CG and is returned as cg=None. Input geometry does not infer
-    weight: the entered tube weight is used directly.
+    no defined CG and is returned as cg=None. The entered tube weight is used
+    directly.
     """
     validate(tube, weights)
     components = (Weight("Tube self-weight", "uniform", tube.weight, 0.0, tube.length), *weights)
@@ -249,19 +239,6 @@ def tube_svg(solution):
     return "".join(parts)
 
 
-def section_svg(tube):
-    inner = 80.0 * (tube.id / tube.od)
-    bore = f'<circle cx="130" cy="145" r="{inner}" fill="white" stroke="#23354b" stroke-width="2"/>' if tube.id > 0 else ""
-    inner_dim = f'<path d="M{130-inner} 246H{130+inner}"/>' if tube.id > 0 else ""
-    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 290" width="100%" role="img" aria-label="Tube cross-section, OD {tube.od:g} inches and ID {tube.id:g} inches">
-    <rect width="260" height="290" fill="white"/>
-    <defs><marker id="cg-section-arrow" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto-start-reverse"><path d="M0 0 L6 3 L0 6Z" fill="#607186"/></marker></defs>
-    <circle cx="130" cy="145" r="80" fill="#e4ecf5" stroke="#23354b" stroke-width="2"/>{bore}
-    <g stroke="#8693a4" stroke-width="1"><path d="M50 145V40M210 145V40"/><path d="M{130-inner} 145V251 M{130+inner} 145V251"/></g>
-    <g stroke="#607186" marker-start="url(#cg-section-arrow)" marker-end="url(#cg-section-arrow)"><path d="M50 45H210"/>{inner_dim}</g>
-    <g font-family="Arial,sans-serif" font-size="14" fill="#23354b" text-anchor="middle"><text x="130" y="30">OD {number(tube.od)} in</text><text x="130" y="271">ID {number(tube.id)} in</text></g></svg>'''
-
-
 def make_distribution(solution):
     """Separate point weights (lbf) from line intensities (lbf/in)."""
     import plotly.graph_objects as go
@@ -361,10 +338,8 @@ def render_calculations(solution):
             else:
                 st.latex(rf"x_{{{i}}}={latex_number(w.start)}\;\mathrm{{in}}")
             st.latex(rf"M_{{0,{i}}}=({latex_number(w.weight)})({latex_number(w.center)})={latex_number(w.moment)}\;\mathrm{{lbf\cdot in}}")
-    with st.expander("Cross-section and model assumptions"):
-        st.latex(rf"A=\frac{{\pi}}{{4}}(OD^2-ID^2)={latex_number(solution.tube.area)}\;\mathrm{{in^2}}")
-        st.write("The entered tube weight is used directly. Changing OD or ID updates the section drawing; "
-                 "it does not infer a different weight. The tube self-weight is uniformly distributed. "
+    with st.expander("Model assumptions"):
+        st.write("The entered tube weight is used directly. The tube self-weight is uniformly distributed. "
                  "Uniform component weights are constant over their entered intervals. The result is the "
                  "longitudinal CG of the tube and all represented parts under uniform gravity. "
                  "Transverse offsets and deformation are outside this one-dimensional model.")
@@ -379,8 +354,8 @@ def weight_defaults(length, ident):
 def initialize_state():
     import streamlit as st
 
-    defaults = {"cg_tube_length": 305.625, "cg_tube_od": 3.96875, "cg_tube_id": 3.219,
-                "cg_tube_weight": 0.0, "cg_weight_ids": [], "cg_next_weight_id": 1}
+    defaults = {"cg_tube_length": 305.625, "cg_tube_weight": 0.0,
+                "cg_weight_ids": [], "cg_next_weight_id": 1}
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
@@ -437,13 +412,9 @@ def input_panel():
         st.caption("Schematic and results update when you commit an input: press Enter or leave the field.")
         st.subheader("Geometry")
         length = st.number_input("Tube length (in)", min_value=.001, step=1.0, format="%.5f", key="cg_tube_length")
-        st.subheader("Cross-section")
-        c1, c2 = st.columns(2)
-        od = c1.number_input("OD (in)", min_value=.001, step=.125, format="%.5f", key="cg_tube_od")
-        id_ = c2.number_input("ID (in)", min_value=0.0, step=.125, format="%.5f", key="cg_tube_id")
         st.subheader("Tube self-weight")
         tube_weight = st.number_input("Total tube weight (lbf)", min_value=0.0, step=10.0, format="%.4f", key="cg_tube_weight")
-        st.caption("Uniform over the full tube. Use the actual tube weight; OD and ID do not calculate it automatically.")
+        st.caption("Enter the actual tube weight, uniformly distributed over the full tube length.")
         st.subheader("Additional parts")
         st.caption("Each entry represents a part's weight at its own CG. Positions can be negative or beyond the tube length.")
         st.button("+ Add weight", key="cg_add_weight", on_click=add_weight, width="stretch")
@@ -476,7 +447,7 @@ def input_panel():
         st.button("Load example", key="cg_load_example", on_click=load_example, width="stretch",
                   help="Replace the current inputs with an editable example containing weights beyond both ends.")
         st.caption("Units: inches and pound-force. Do not include the same part in more than one weight entry.")
-    return Tube(length, od, id_, tube_weight), weights, calculate
+    return Tube(length, tube_weight), weights, calculate
 
 
 def render_app():
@@ -495,20 +466,15 @@ def render_app():
     initialize_state()
     tube, weights, calculate = input_panel()
     st.title("Tube Center of Gravity")
-    st.caption("Straight circular tube · component weights · inches · pound-force")
+    st.caption("Straight tube · component weights · inches · pound-force")
     try:
         solution = solve_cg(tube, weights)
     except (ValueError, OverflowError) as error:
         st.error(str(error))
         st.stop()
-    left, right = st.columns([3.4, 1.0], gap="medium")
-    with left:
-        st.subheader("Tube schematic")
-        st.caption("Horizontal positions to scale. Dashed extensions show coordinates beyond the tube; arrow lengths do not encode weight.")
-        st.image(tube_svg(solution), width="stretch")
-    with right:
-        st.subheader("Cross-section")
-        st.image(section_svg(tube), width="stretch")
+    st.subheader("Tube schematic")
+    st.caption("Horizontal positions to scale. Dashed extensions show coordinates beyond the tube; arrow lengths do not encode weight.")
+    st.image(tube_svg(solution), width="stretch")
     if calculate:
         st.toast("Center of gravity recalculated from the current inputs.")
     st.subheader("Assembly results")
